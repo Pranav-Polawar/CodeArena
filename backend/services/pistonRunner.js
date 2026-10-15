@@ -1,25 +1,26 @@
 const axios = require('axios');
 
-// Map frontend language keys to Piston API supported names and runtime versions
+// Judge0 Language IDs
 const LANGUAGE_MAP = {
-  cpp: { language: 'c++', version: '*' },
-  'c++': { language: 'c++', version: '*' },
-  python: { language: 'python', version: '*' },
-  javascript: { language: 'javascript', version: '*' },
-  java: { language: 'java', version: '*' }
+  cpp: 54,        // C++ (GCC 9.2.0)
+  'c++': 54,
+  c_cpp: 54,
+  python: 71,     // Python (3.8.1)
+  python3: 71,
+  py: 71,
+  javascript: 63, // JavaScript (Node.js 12.14.0)
+  js: 63,
+  java: 62        // Java (OpenJDK 13.0.1)
 };
 
 /**
- * Executes source code using the Piston API
- * @param {string} language - Target language (cpp, python, javascript, java)
- * @param {string} code - Source code string
- * @param {string} input - Optional stdin input
+ * Executes code via Judge0 CE public endpoint
  */
 async function executeCode(language, code, input = '') {
-  const langKey = language.toLowerCase();
-  const langConfig = LANGUAGE_MAP[langKey];
+  const langKey = String(language || '').toLowerCase().trim();
+  const languageId = LANGUAGE_MAP[langKey];
 
-  if (!langConfig) {
+  if (!languageId) {
     return {
       success: false,
       status: 'Unsupported Language',
@@ -28,49 +29,68 @@ async function executeCode(language, code, input = '') {
   }
 
   try {
-    const response = await axios.post('https://emkc.org/api/v2/piston/execute', {
-      language: langConfig.language,
-      version: langConfig.version,
-      files: [
-        {
-          content: code
-        }
-      ],
-      stdin: input
-    });
+    const response = await axios.post(
+      'https://judge0-ce.p.rapidapi.com/submissions?wait=true',
+      {
+        source_code: code,
+        language_id: languageId,
+        stdin: String(input || '')
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        timeout: 10000
+      }
+    );
 
-    const { run, compile } = response.data;
+    const { status, stdout, stderr, compile_output } = response.data;
 
-    // Handle compilation errors (e.g., C++ or Java syntax errors)
-    if (compile && compile.code !== 0) {
+    // Compilation error
+    if (status.id === 6) {
       return {
         success: false,
         status: 'Compilation Error',
-        output: compile.stderr || compile.output
+        output: compile_output || stderr || 'Compilation failed.'
       };
     }
 
-    // Handle runtime errors (e.g., divide by zero, array index out of bounds)
-    if (run && run.code !== 0) {
+    // Runtime errors / Time limit exceeded / Wrong answer
+    if (status.id !== 3) {
       return {
         success: false,
-        status: 'Runtime Error',
-        output: run.stderr || run.output
+        status: status.description || 'Runtime Error',
+        output: stderr || stdout || 'Execution error.'
       };
     }
 
     return {
       success: true,
       status: 'Accepted',
-      output: run ? run.stdout : ''
+      output: stdout || ''
     };
   } catch (error) {
-    console.error('Piston Execution Error:', error?.response?.data || error.message);
-    return {
-      success: false,
-      status: 'Server Error',
-      output: 'Failed to connect to the code execution service.'
-    };
+    console.error('Code Execution Error:', error?.response?.data || error.message);
+    
+    // Fallback: Try alternative public execution instance
+    try {
+      const fallbackRes = await axios.post('https://ce.judge0.com/submissions?wait=true', {
+        source_code: code,
+        language_id: languageId,
+        stdin: String(input || '')
+      });
+      return {
+        success: fallbackRes.data.status.id === 3,
+        status: fallbackRes.data.status.description,
+        output: fallbackRes.data.stdout || fallbackRes.data.stderr || fallbackRes.data.compile_output
+      };
+    } catch (fallbackErr) {
+      return {
+        success: false,
+        status: 'Server Error',
+        output: 'Code execution service unreachable.'
+      };
+    }
   }
 }
 
