@@ -1,0 +1,5 @@
+{
+  "name": "CodeArena — Online Judge",
+  "description": "Multi-language online coding judge with automated test execution, problem catalog, user submissions, and AI hints.",
+  "capabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
